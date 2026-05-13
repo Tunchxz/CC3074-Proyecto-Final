@@ -102,3 +102,40 @@ Durante esta semana, la Fase 3 del framework CRISP-DM se cubre íntegramente. La
 #### Único elemento postergado a la Semana 3
 
 - **Partición train / validation / test:** depende del algoritmo y la estrategia de validación temporal (split aleatorio vs split por año vs validación cruzada por país). Es una decisión que pertenece propiamente a la fase de Modelado.
+
+## Semana 3 - Modelado Inicial: Construcción y Comparación de Modelos Base
+
+### Descripción
+
+En esta tercera etapa se ejecutó la **porción inicial de la Fase 4 (Modelado) del marco CRISP-DM** sobre el conjunto `data_transformado.csv` (175 filas × 60 columnas) construido en la Semana 2. Se planteó el problema como una **regresión supervisada** sobre la variable objetivo `pct_uso_total`, bajo un **enfoque predictivo (lag-based)** que solo admite información del año anterior y atributos invariantes, evitando leakage estructural. El dataset modelable quedó en 161 filas × 22 predictoras tras eliminar las 14 filas correspondientes al primer año observado por país.
+
+El trabajo de la semana incluyó:
+
+- **Formulación del problema:** definición como regresión supervisada con `pct_uso_total` como target y justificación del enfoque lag-based.
+- **Selección de features:** identificación explícita de columnas prohibidas por leakage (29 descartadas) y construcción del conjunto admisible de 22 predictoras.
+- **División train/test:** split estratificado por cuartiles del target (`pd.qcut(y, q=4)`), con verificación de balance entre train y test.
+- **Definición de modelos:** entrenamiento de 5 modelos de tres familias distintas (lineal, basada en distancia, basada en árboles), con escalado encapsulado en `Pipeline` para evitar leakage.
+- **Entrenamiento y evaluación:** cálculo de MAE, RMSE, R² y MAPE en train y test para los cinco modelos.
+- **Comparación y diagnóstico de overfit:** análisis de gaps train-test.
+- **Diagnóstico visual:** predicho vs real, residuales vs predicho, histograma y Q-Q plot del mejor modelo.
+- **Importancia de features:** lectura conjunta de coeficientes lineales y `feature_importances_` de modelos tree-based.
+- **Análisis de errores:** descomposición por país, por década y observaciones con mayor error absoluto.
+
+### Highlights
+
+#### Hallazgos centrales del modelado inicial
+
+- **El problema es altamente predecible bajo enfoque lag-based**: cuatro de los cinco modelos superan R² = 0.98 en test. El componente autorregresivo (el valor del año anterior) carga con la mayor parte de la señal.
+- **Ranking del experimento**: Ridge (R² = 0.9919) > Linear Regression (R² = 0.9916) > Random Forest (R² = 0.9889) > Decision Tree (R² = 0.9821) > KNN (R² = 0.8882). Ridge y Linear son prácticamente indistinguibles entre sí; Random Forest queda muy cerca con una arquitectura completamente distinta, lo cual da robustez al hallazgo.
+- **Linealidad confirmada**: la cercanía entre Linear y Ridge, junto con el R² casi máximo de ambos, sugiere que la relación entre los lags y el target es esencialmente lineal. La regularización L2 aporta una mejora marginal al estabilizar coeficientes inflados por multicolinearidad.
+- **Overfit claro en Decision Tree**: R² train = 1.0000 con R² test = 0.9821 (gap 0.018). El árbol único sin restricciones memoriza el train. Random Forest, al promediar 100 árboles, reduce drásticamente este efecto (gap 0.009).
+- **KNN como modelo no apto** para este problema: la distancia euclídea en un espacio mixto (5 lags continuos + 13 dummies binarias + 4 features adicionales) produce vecindarios poco informativos. El gap R² (0.048) y el MAE en test (6.05) lo descartan claramente frente a los demás.
+- **Importancia concentrada en dos predictores**: `pct_uso_total_lag1` (62-75 % en árboles) y `pct_uso_26_50_lag1` (14-24 %) concentran casi toda la información. Las dummies de país y las variables temporales aportan poco, indicando que el lag del propio target ya absorbe la heterogeneidad geográfica y temporal.
+- **Sesgo de sobreestimación moderado**: residual medio en test = −0.36 (sobreestima ~0.4 puntos porcentuales en promedio). El sesgo aparece en países con saltos abruptos en su trayectoria reciente (Bolivia 2014, Ecuador 2019, Colombia 2022).
+
+#### Limitaciones del experimento
+
+1. **Un único split** introduce varianza en las métricas: con otra semilla el orden Ridge/Linear/RF podría intercambiarse dado lo cercano de sus valores.
+2. **Hiperparámetros por defecto**: ningún modelo se entrenó con búsqueda de parámetros; los valores reportados son una cota inferior del rendimiento alcanzable.
+3. **Dependencia temporal ignorada en el split**: el split aleatorio mezcla años recientes y antiguos entre train y test. Una validación temporal complementaría el análisis.
+4. **Tamaño muestral pequeño** (161 filas, 22 predictoras): los modelos de alta capacidad (DT, KNN) están en desventaja estructural frente a los lineales regularizados.
